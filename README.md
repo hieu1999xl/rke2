@@ -1,9 +1,9 @@
 ---
 title: Simple RKE2, Longhorn, and Rancher Install
-author: Andy Clemenko, @clemenko, clemenko@gmail.com
+author: Andy Clemenko, @clemenko, andy.clemenko@rancherfederal.com
 ---
 
-# Simple RKE2, Longhorn, and Rancher Install - Updated 2024
+# Simple RKE2, Longhorn, and Rancher Install
 
 ![logp](img/logo_long.jpg)
 
@@ -14,10 +14,6 @@ Throughout my career there has always been a disconnect between the documentatio
 - [Longhorn](https://longhorn.io) - Unified storage layer
 
 We will need a few tools for this guide. We will walk through how to install `helm` and `kubectl`.
-
-Or [Watch the video](https://youtu.be/oM-6sd4KSmA).
-
-**For more fun check out my list of other content and videos at https://rfed.io/links.**
 
 ---
 
@@ -46,27 +42,27 @@ Just a geek - Andy Clemenko - @clemenko - andy.clemenko@rancherfederal.com
 
 ## Prerequisites
 
-The prerequisites are fairly simple. We need 3 linux servers with access to the internet. They can be bare metal, or in the cloud provider of your choice. I prefer [Digital Ocean](https://digitalocean.com). We need an `ssh` client to connect to the servers. And finally DNS to make things simple. Ideally we need a URL for the Rancher interface. For the purpose of this guide let's use `rancher.dockr.life`. We will need to point that name to the first server of the cluster. While we are at it, a wildcard DNS for your domain will help as well.
+The prerequisites are fairly simple. We need 3 linux servers with access to the internet. They can be bare metal, or in the cloud provider of your choice. I prefer [Digital Ocean](https://digitalocean.com). We need an `ssh` client to connect to the servers. And finally DNS to make things simple. Ideally we need a URL for the Rancher interface. For the purpose of the this guide let's use `rancher.dockr.life`. We will need to point that name to the first server of the cluster. Here are all the files: https://github.com/clemenko/rke_install_blog.
 
 ## Linux Servers
 
 For the sake of this guide we are going to use [Ubuntu](https://ubuntu.com). Our goal is a simple deployment. The recommended size of each node is 4 Cores and 8GB of memory with at least 60GB of storage. One of the nice things about [Longhorn](https://longhorn.io) is that we do not need to attach additional storage. Here is an example list of servers. Please keep in mind that your server names can be anything. Just keep in mind which ones are the "server" and "agents".
 
-| name | ip | memory | core | disk | os |
-|---| --- | --- | --- | --- | --- |
-|rancher1| 142.93.189.52  | 8192 | 4 | 160 | Ubuntu 21.10 x64 |
-|rancher2| 68.183.150.214 | 8192 | 4 | 160 | Ubuntu 21.10 x64 |
-|rancher3| 167.71.188.101 | 8192 | 4 | 160 | Ubuntu 21.10 x64 |
+```text
+rancher1     142.93.189.52      8192   4   160   Ubuntu 21.10 x64
+rancher2     68.183.150.214     8192   4   160   Ubuntu 21.10 x64
+rancher3     167.71.188.101     8192   4   160   Ubuntu 21.10 x64
+```
 
-
-For Kubernetes we will need to "set" one of the nodes as the control plane. Rancher1 looks like a winner for this. First we need to `ssh` into all three nodes and make sure we have all the updates and add a few things. For the record I am not a fan of software firewalls. Please feel free to reach to me to discuss. :D
+For Kubernetes we will need to "set" one of the nodes as the control plane. Rancher1 looks like a winner for this. First we need to `ssh` into all three nodes and make sure we have all the updates. For the record I am not a fan of software firewalls. Please feel free to reach to me to discuss. :D
 
 **Ubuntu**:
 
 ```bash
 # Ubuntu instructions 
 # stop the software firewall
-systemctl disable --now ufw
+systemctl stop ufw
+systemctl disable ufw
 
 # get updates, install nfs, and apply
 apt update
@@ -82,13 +78,15 @@ apt autoremove -y
 ```bash
 # Rocky instructions 
 # stop the software firewall
-systemctl disable --now firewalld
+systemctl stop firewalld
+systemctl disable firewalld
 
 # get updates, install nfs, and apply
 yum install -y nfs-utils cryptsetup iscsi-initiator-utils
 
 # enable iscsi for Longhorn
-systemctl enable --now iscsid.service 
+systemctl start iscsid.service
+systemctl enable iscsid.service
 
 # update all the things
 yum update -y
@@ -103,16 +101,15 @@ Cool, lets move on to the RKE2.
 
 ### RKE2 Server Install
 
-Now that we have all the nodes up to date, let's focus on `rancher1`. While this might seem controversial, `curl | bash` does work nicely. The install script will use the tarball install for **Ubuntu** and the RPM install for **Rocky/Centos**. Please be patient, the start command can take a minute. Here are the [rke2 docs](https://docs.rke2.io/install/methods/) and [install options](https://docs.rke2.io/install/configuration#configuring-the-linux-installation-script) for reference.
-
->**It is important to note that we are installing v1.28 in this guide. There are some changes in v1.25 that require a few modifications. I will note them below.**
+Now that we have all the nodes up to date, let's focus on `rancher1`. While this might seem controversial, `curl | bash` does work nicely. For more information about the Rancher versions, please refer to the  [Support Matrix](https://www.suse.com/suse-rancher/support-matrix/all-supported-versions/rancher-v2-6-3/). The install script will use the tarball install for **Ubuntu** and the RPM install for **Rocky/Centos**. Please be patient, the start command can take a minute. Here are the [rke2 docs](https://docs.rke2.io/install/methods/) and [install options](https://docs.rke2.io/install/install_options/install_options/) for reference.
 
 ```bash
 # On rancher1
-curl -sfL https://get.rke2.io | INSTALL_RKE2_CHANNEL=v1.28 INSTALL_RKE2_TYPE=server sh - 
+curl -sfL https://get.rke2.io | INSTALL_RKE2_TYPE=server sh - 
 
 # start and enable for restarts - 
-systemctl enable --now rke2-server.service
+systemctl enable rke2-server.service 
+systemctl start rke2-server.service
 ```
 
 Here is what the **Ubuntu** version should look like:
@@ -123,25 +120,20 @@ Let's validate everything worked as expected. Run a `systemctl status rke2-serve
 
 ![rke_install](img/rke_status.jpg)
 
-Perfect! Now we can start talking Kubernetes. We need to symlink the `kubectl` cli on `rancher1` that gets installed from RKE2.
+Perfect! Now we can start talking Kubernetes. We need to install the `kubectl` cli on `rancher1`. FYI, We can install a newer `kubectl` without any issues.
 
 ```bash
-# symlink all the things - kubectl
-ln -s $(find /var/lib/rancher/rke2/data/ -name kubectl) /usr/local/bin/kubectl
+# another curl...
+curl -L# https://dl.k8s.io/release/v1.23.0/bin/linux/amd64/kubectl -o /usr/local/bin/kubectl
 
-# add kubectl conf with persistence, as per Duane
-echo "export KUBECONFIG=/etc/rancher/rke2/rke2.yaml PATH=$PATH:/usr/local/bin/:/var/lib/rancher/rke2/bin/" >> ~/.bashrc
-source ~/.bashrc
+# make it executable
+chmod 755 /usr/local/bin/kubectl
+
+# add kubectl conf
+export KUBECONFIG=/etc/rancher/rke2/rke2.yaml 
 
 # check node status
-kubectl get node
-```
-
-We will also need to get the token from rancher1.
-
-```bash
-# save this for rancher2 and rancher3
-cat /var/lib/rancher/rke2/server/node-token
+kubectl  get node
 ```
 
 Hopefully everything looks good! Here is an example.
@@ -150,21 +142,15 @@ Hopefully everything looks good! Here is an example.
 
 For those that are not TOO familiar with k8s, the config file is what `kubectl` uses to authenticate to the api service. If you want to use a workstation, jump box, or any other machine you will want to copy `/etc/rancher/rke2/rke2.yaml`. You will want to modify the file to change the ip address. We will need one more file from `rancher1`, aka the server, the agent join token. Copy `/var/lib/rancher/rke2/server/node-token`, we will need it for the agent install.
 
-Side note on Tokens. RKE2 uses the TOKEN as a way to authenticate the agent to the server service. This is a much better system than "trust on first use". The goal of the token process is to setup a control plane Mutual TLS (mtls) certificate termination.
+Side note on Tokens. RKE2 uses the TOKEN has a way to authenticate the agent to the server service. This is a much better system than "trust on first use". The goal of the token process is to setup a control plane Mutual TLS (mtls) certificate termination.
 
 ### RKE2 Agent Install
 
 The agent install is VERY similar to the server install. Except that we need an agent config file before starting. We will start with `rancher2`. We need to install the agent and setup the configuration file.
 
 ```bash
-# we can export the rancher1 IP from the first server.
-export RANCHER1_IP=192.168.1.1  # change this!
-
-# and we can export the token from rancher1.
-export TOKEN=something_magical # change this as well.
-
 # we add INSTALL_RKE2_TYPE=agent
-curl -sfL https://get.rke2.io | INSTALL_RKE2_CHANNEL=v1.28 INSTALL_RKE2_TYPE=agent sh -  
+curl -sfL https://get.rke2.io | INSTALL_RKE2_TYPE=agent sh -  
 
 # create config file
 mkdir -p /etc/rancher/rke2/ 
@@ -176,14 +162,15 @@ echo "server: https://$RANCHER1_IP:9345" > /etc/rancher/rke2/config.yaml
 echo "token: $TOKEN" >> /etc/rancher/rke2/config.yaml
 
 # enable and start
-systemctl enable --now rke2-agent.service
+systemctl enable rke2-agent.service
+systemctl start rke2-agent.service
 ```
 
 What should this look like:
 
 ![rke_agent](img/rke_agent.jpg)
 
-Rinse and repeat. Run the same install commands on `rancher3`. Next we can validate all the nodes are playing nice by running `kubectl get node -o wide` on `rancher1`.
+Rinse and repeat. Run the same install commands on `rancher3`. Next we can validate all the nodes are playing nice by running `kubectl get node -o wide` on `rancher1`. 
 
 ![moar_nodes](img/moar_nodes.jpg)
 
@@ -191,15 +178,12 @@ Huzzah! RKE2 is fully installed. From here on out we will only need to talk to t
 
 ## Rancher
 
-For more information about the Rancher versions, please refer to the  [Support Matrix](https://www.suse.com/suse-rancher/support-matrix/all-supported-versions/). We are going to use the latest version. For additional reading take a look at the [Rancher docs](https://ranchermanager.docs.rancher.com).
-
 ### Rancher Install
 
-For Rancher we will need [Helm](https://helm.sh/). We are going to live on the edge! Here are the [install docs](https://ranchermanager.docs.rancher.com/getting-started/installation-and-upgrade/install-upgrade-on-a-kubernetes-cluster) for reference.
+For Rancher we will need [Helm](https://helm.sh/). We are going to live on the edge! Here are the [Rancher docs](https://rancher.com/docs/rancher/v2.6/en/installation/install-rancher-on-k8s/) for reference.
 
 ```bash
 # on the server rancher1
-# add helm
 curl -#L https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
 # add needed helm charts
@@ -207,16 +191,16 @@ helm repo add rancher-latest https://releases.rancher.com/server-charts/latest
 helm repo add jetstack https://charts.jetstack.io
 ```
 
-Quick note about Rancher. Rancher needs jetstack/cert-manager to create the self signed TLS certificates. We need to install it with the Custom Resource Definition (CRD). Please pay attention to the `helm` install for Rancher. The URL`rancher.dockr.life` will need to be changed to fit your FQDN. Also notice I am setting the `bootstrapPassword` and replicas. This allows us to skip a step later. :D
+Quick note about Rancher. Rancher needs jetstack/cert-manager to create the self signed TLS certificates. We need to install it with the Custom Resource Definition (CRD). Please pay attention to the `helm` install for Rancher. The URL will need to be changed to fit your FQDN. Also notice I am setting the `bootstrapPassword` and replicas. This allows us to skip a step later. :D
 
 ```bash
-# still on  rancher1
+# again from rancher1
+kubectl apply -f https://github.com/jetstack/cert-manager/releases/download/v1.6.1/cert-manager.crds.yaml
 
 # helm install jetstack
-helm upgrade -i cert-manager jetstack/cert-manager -n cert-manager --create-namespace --set installCRDs=true
+helm upgrade -i cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace
 
 # helm install rancher
-# CHANGE rancher.dockr.life to your FQDN
 helm upgrade -i rancher rancher-latest/rancher --create-namespace --namespace cattle-system --set hostname=rancher.dockr.life --set bootstrapPassword=bootStrapAllTheThings --set replicas=1
 ```
 
@@ -229,6 +213,14 @@ root@rancher1:~# helm repo add rancher-latest https://releases.rancher.com/serve
 root@rancher1:~# helm repo add jetstack https://charts.jetstack.io
 "jetstack" has been added to your repositories
 
+root@rancher1:~# kubectl apply -f https://github.com/jetstack/cert-manager/releases/download/v1.6.1/cert-manager.crds.yaml
+customresourcedefinition.apiextensions.k8s.io/certificaterequests.cert-manager.io created
+customresourcedefinition.apiextensions.k8s.io/certificates.cert-manager.io created
+customresourcedefinition.apiextensions.k8s.io/challenges.acme.cert-manager.io created
+customresourcedefinition.apiextensions.k8s.io/clusterissuers.cert-manager.io created
+customresourcedefinition.apiextensions.k8s.io/issuers.cert-manager.io created
+customresourcedefinition.apiextensions.k8s.io/orders.acme.cert-manager.io created
+
 root@rancher1:~# helm upgrade -i cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace
 Release "cert-manager" does not exist. Installing it now.
 NAME: cert-manager
@@ -238,7 +230,7 @@ STATUS: deployed
 REVISION: 1
 TEST SUITE: None
 NOTES:
-cert-manager v1.14.4 has been deployed successfully!
+cert-manager v1.7.1 has been deployed successfully!
 
 In order to begin issuing certificates, you will need to set up a ClusterIssuer
 or Issuer resource (for example, by creating a 'letsencrypt-staging' issuer).
@@ -287,7 +279,7 @@ Happy Containering!
 root@rancher1:~#
 ```
 
-We can also run a `kubectl get pod -A` to see if everything is running. Keep in mind it may take a minute or so for all the pods to come up. GUI time...
+We can also run a `kubectl get pod -A` to see if everything it running. Keep in mind it may take a minute or so for all the pods to come up. GUI time...
 
 ### Rancher GUI
 
@@ -305,17 +297,17 @@ We need to validate the Server URL and accept the terms and conditions. And we a
 
 ### Rancher Design
 
-Let's take a second and talk about Ranchers Multi-cluster design. Bottom line, Rancher can operate in a Spoke and Hub model. Meaning one k8s cluster for Rancher and then "downstream" clusters for all the workloads. Personally I prefer the decoupled model where there is only one cluster per Rancher install. This allows for continued manageability during networks outages. For the purpose of the is guide we are concentrate on the single cluster deployment. There is good [documentation](https://ranchermanager.docs.rancher.com/how-to-guides/new-user-guides/kubernetes-clusters-in-rancher-setup/register-existing-clusters) on "importing" downstream clusters.
+Let's take a second and talk about Ranchers Multi-cluster design. Bottom line, Rancher can operate in a Spoke and Hub model. Meaning one k8s cluster for Rancher and then "downstream" clusters for all the workloads. Personally I prefer the decoupled model where there is only one cluster per Rancher install. This allows for continued manageability during networks outages. For the purpose of the is guide we are concentrate on the single cluster deployment. There is good [documentation](https://rancher.com/docs/rancher/v2.6/en/cluster-provisioning/registered-clusters/) on "importing" downstream clusters.
 
 ## Longhorn
 
-### Longhorn Install
+### Lognhorn Install
 
 There are two methods for installing. Rancher has Chart built in.
 
 ![charts](img/charts.jpg)
 
-Now for the good news, [Longhorn docs](https://longhorn.io/docs/1.6.1/deploy/install/) show two easy install methods. Helm and `kubectl`. Let's stick with Helm for this guide.
+Now for the good news, [Longhorn docs](https://longhorn.io/docs/1.2.4/deploy/install/) show two easy install methods. Helm and `kubectl`. Let's stick with Helm for this guide.
 
 ```bash
 # get charts
@@ -332,7 +324,7 @@ Fairly easy right?
 
 ### Longhorn GUI
 
-One of the benefits of Rancher is its ability to adjust to what's installed. Meaning the Rancher GUI will see Longhorn is installed and provide a link. Click it.
+One of the benefits of Rancher is it's ability to adjust to whats installed. Meaning the Rancher GUI will see Longhorn is installed and provide a link. Click it.
 
 ![longhorn installed](img/longhorn_installed.jpg)
 
@@ -356,10 +348,6 @@ Yes we can automate all the things. Here is the repo I use automating the comple
 
 ## Conclusion
 
-As we can see, setting up RKE2, Rancher and Longhorn is not that complicated. We can get deploy Kubernetes, a storage layer, and a management gui in a few minutes. Simple, right? One of the added benefits of using the Suse / Rancher stack is that all the pieces are modular. Use only what you need, when you need it. Hope this was helpful. Please feel free reach out, or open any issues at https://github.com/clemenko/rke_install_blog.
-
-thanks!
+As we can see setting up RKE2, Rancher and Longhorn is not that complicated. One of the added benefits of using the Suse / Rancher stack is that all the pieces are modular. Use only what you need, when you need it.
 
 ![success](img/success.jpg)
-
-**For more fun check out my list of other content and videos at https://rfed.io/links.**
